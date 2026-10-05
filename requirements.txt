@@ -1,3 +1,4 @@
+pillow
 python-telegram-bot
 google-genai
 pillow
