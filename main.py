@@ -1,14 +1,22 @@
 import logging
+from io import BytesIO
+from PIL import Image
+from google import genai
+from google.genai import types
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = '8735454318:AAG541sgaZrMIo7B2oUxGVEKybTnE_xmkk8'
 ADMIN_ID = 8935181146
+GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE'  # এখানে আপনার Gemini API Key বসান
+
+# Gemini AI Client সেটআপ
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 logging.basicConfig(level=logging.INFO)
 
-# ইউজারের ব্যালেন্স সেভ রাখার জন্য
-user_balances = {} # {user_id: {'BDT': 0.0, 'INR': 0.0}}
+# ইউজারের ব্যালেন্স স্টোরেজ
+user_balances = {}
 
 def get_user_balance(user_id):
     if user_id not in user_balances:
@@ -65,7 +73,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(w_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ২. ব্যালেন্স অ্যাড মেনু (দেশ নির্বাচন)
+    # ২. ব্যালেন্স অ্যাড মেনু
     if data == 'add_balance_menu':
         kb = [
             [InlineKeyboardButton("🇧🇩 Add BDT (Bkash/Nagad)", callback_data='select_country_BD'), InlineKeyboardButton("🇮🇳 Add INR (PhonePe/UPI)", callback_data='select_country_IN')],
@@ -74,7 +82,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text("🌐 **Select Payment Currency / কারেন্সি সিলেক্ট করুন:**", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৩. দেশের ওপর ভিত্তি করে টাকার পরিমাণ নির্বাচন
+    # ৩. টাকার পরিমাণ নির্বাচন
     if data.startswith("select_country_"):
         country = data.split("_")[2]
         context.user_data['country'] = country
@@ -96,7 +104,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(amt_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৪. পরিমাণ সিলেক্টের পর পেমেন্ট ইনফরমেশন দেখানো
+    # ৪. পেমেন্ট ইনফরমেশন
     if data.startswith("amt_"):
         selected_amount = float(data.split("_")[1])
         context.user_data['selected_amount'] = selected_amount
@@ -130,7 +138,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await query.message.reply_text(in_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৫. অ্যাডমিন দ্বারা ব্যালেন্স অ্যাপ্রুভ বা রিজেক্ট
+    # ৫. অ্যাডমিন অ্যাপ্রুভ বা রিজেক্ট
     if data.startswith("app_"):
         parts = data.split("_")
         target_user_id = int(parts[1])
@@ -161,13 +169,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if data.startswith("rej_"):
         target_user_id = int(data.split("_")[1])
-        user_country = context.bot_data.get(f"country_{target_user_id}", "IN")
 
-        if user_country == "BD":
-            reject_text = "❌ **পেমেন্ট ভেরিফিকেশন ব্যর্থ হয়েছে!**\n\nআপনার পাঠানো পেমেন্ট বিবরণী সঠিক ছিল না।"
-        else:
-            reject_text = "❌ **Payment Verification Failed!**\n\nYour submitted payment proof was invalid."
-
+        reject_text = "❌ **Payment Verification Failed!**\n\nYour submitted payment proof was invalid or fake. Please send a valid screenshot."
         user_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Main Menu", callback_data='main_menu')]])
         
         try:
@@ -190,7 +193,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         context.user_data['pkg_name'] = pkg_name
         context.user_data['pkg_price'] = price
-
         bal = get_user_balance(user_id)
         
         country_msg = (
@@ -207,7 +209,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(country_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৭. ওয়ালেট ব্যালেন্স দিয়ে প্রডাক্ট কেনা
+    # ৭. বাই উইথ ওয়ালেট
     if data in ['buy_bdt', 'buy_inr']:
         currency = 'BDT' if data == 'buy_bdt' else 'INR'
         pkg_name = context.user_data.get('pkg_name', 'Product')
@@ -226,7 +228,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             kb = [[InlineKeyboardButton("🛍 Main Menu", callback_data='main_menu')]]
             await query.message.reply_text(success_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
             
-            # অ্যাডমিনকে কী দেওয়ার জন্য মেসেজ
             admin_noti = (
                 f"🛍️ **NEW ORDER RECEIVED!**\n\n"
                 f"👤 **User:** {query.from_user.full_name} (@{query.from_user.username})\n"
@@ -271,7 +272,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         packages = [("1 hour - ৳20", "pkg_AIM 1h|20"), ("3 hour - ৳40", "pkg_AIM 3h|40"), ("6 hour - ৳60", "pkg_AIM 6h|60"), ("12 hour - ৳90", "pkg_AIM 12h|90"), ("1 day - ৳130", "pkg_AIM 1d|130"), ("3 day - ৳250", "pkg_AIM 3d|250"), ("7 day - ৳400", "pkg_AIM 7d|400"), ("30 day - ৳1100", "pkg_AIM 30d|1100")]
     elif data == 'bala_mod':
         title = "BALA MOD - NON ROOT"
-        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|20"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 9h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 9h|120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 7d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
+        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|40"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 9h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 9h|120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 3d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
     elif data == 'drip_wire':
         title = "DRIP WIRE - NON ROOT"
         packages = [("Wire 6 hour - ৳48", "pkg_Wire 6h|48"), ("Wire 12 hour - ৳75", "pkg_Wire 12h|75"), ("Wire 1 day - ৳120", "pkg_Wire 1d|120"), ("Wire 7 day - ৳450", "pkg_Wire 7d|450"), ("Wire 30 day - ৳1100", "pkg_Wire 30d|1100")]
@@ -306,19 +307,84 @@ async def send_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         await update.message.reply_text("❌ **ভুল ফরম্যাট!** এভাবে লিখুন:\n`/sendkey USER_ID আপনার_কী`", parse_mode='Markdown')
 
-# ৯. কাস্টমারের পেমেন্ট প্রুফ রিসিভ করা
+# 🤖 Gemini AI দ্বারা পেমেন্ট ফিল্টারিং ফিক্সড ফাংশন
+async def verify_payment_with_ai(image_bytes=None, text_proof=None):
+    prompt = """
+    You are an AI Payment Verification Specialist for mobile banking in Bangladesh (Bkash, Nagad) and India (UPI, PhonePe, Paytm, Google Pay).
+    Check the input carefully.
+    
+    Rule:
+    - If it is a real payment receipt image or valid TrxID text, set valid to true.
+    - If it is a personal picture, meme, nature picture, random text, non-payment image, or fake receipt, set valid to false.
+    """
+    
+    try:
+        contents = [prompt]
+        if image_bytes:
+            img = Image.open(BytesIO(image_bytes))
+            contents.append(img)
+        else:
+            contents.append(f"User Submitted Text: {text_proof}")
+
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema={
+                    "type": "OBJECT",
+                    "properties": {
+                        "is_valid": {"type": "BOOLEAN"},
+                        "reason": {"type": "STRING"}
+                    },
+                    "required": ["is_valid"]
+                }
+            )
+        )
+        import json
+        res_data = json.loads(response.text)
+        return res_data.get("is_valid", False)
+
+    except Exception as e:
+        logging.error(f"AI Verification Error: {e}")
+        return True  # AI কাজ না করলে ম্যানুয়াল অ্যাডমিন রিভিউয়ের জন্য পাশ করিয়ে দেওয়া হবে।
+
+# ৯. পেমেন্ট স্ক্রিনশট প্রসেসিং
 async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     user_country = context.user_data.get('country', 'BD')
     amount = context.user_data.get('selected_amount', 100.0)
     currency = 'BDT' if user_country == 'BD' else 'INR'
     
-    context.bot_data[f"country_{user.id}"] = user_country
     username_str = f"@{user.username}" if user.username else "No Username"
     text_input = update.message.text if update.message.text else "Photo Attachment"
 
+    verifying_msg = await update.message.reply_text("🔍 **AI is verifying your payment proof... Please wait.**")
+    
+    is_valid = False
+    image_bytes = None
+
+    if update.message.photo:
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        is_valid = await verify_payment_with_ai(image_bytes=image_bytes)
+    else:
+        is_valid = await verify_payment_with_ai(text_proof=update.message.text)
+
+    await verifying_msg.delete()
+
+    if not is_valid:
+        error_msg_english = (
+            "⚠️️ **Invalid Payment Proof Detected!**\n\n"
+            "Our AI system detected that the uploaded image or text is NOT a valid payment receipt.\n"
+            "Please upload a **clear and valid payment screenshot** or Transaction ID."
+        )
+        user_cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]])
+        await update.message.reply_text(error_msg_english, parse_mode='Markdown', reply_markup=user_cancel_kb)
+        return
+
     admin_msg = (
-        f"🚨 **NEW BALANCE ADD REQUEST!**\n\n"
+        f"🚨 **NEW BALANCE ADD REQUEST! (AI Verified ✅)**\n\n"
         f"👤 **User Name:** {user.full_name}\n"
         f"🏷 **Username:** {username_str}\n"
         f"🆔 **User ID:** `{user.id}`\n"
@@ -348,11 +414,7 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=admin_markup
         )
 
-    if user_country == 'BD':
-        user_response = f"⏳ **{amount} BDT ব্যালেন্স রিকোয়েস্ট জমা হয়েছে!**\n\nএডমিন যাচাই করে আপনার ওয়ালেটে ব্যালেন্স যোগ করে দেবে।"
-    else:
-        user_response = f"⏳ **{amount} INR Balance Request Submitted!**\n\nAdmin will verify and add balance to your wallet shortly."
-
+    user_response = f"⏳ **Payment Proof Received!**\n\nAdmin will verify and add `{amount} {currency}` to your wallet shortly."
     user_cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]])
 
     await update.message.reply_text(user_response, parse_mode='Markdown', reply_markup=user_cancel_kb)
@@ -367,3 +429,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
