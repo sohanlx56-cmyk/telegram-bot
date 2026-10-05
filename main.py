@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 from io import BytesIO
 from PIL import Image
 from google import genai
@@ -19,7 +20,6 @@ TOKEN = '8854896234:AAFvwhgwe5AorYDt8kAkNvPOcJwakrxbZ9Q'
 ADMIN_ID = 8935181146
 GEMINI_API_KEY = 'AQ.Ab8RN6Kuz6k0GfcaRuJRarQb-0SZx4w9jjNQ03tVNTVcXIkSA'
 
-# Gemini AI Client
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 logging.basicConfig(
@@ -28,6 +28,7 @@ logging.basicConfig(
 )
 
 user_balances = {}
+pending_keys = {} # Store user ID for pending key delivery
 
 def get_user_balance(user_id):
     if user_id not in user_balances:
@@ -43,8 +44,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         [InlineKeyboardButton("💰 My Wallet / ব্যালেন্স", callback_data='my_wallet'), InlineKeyboardButton("➕ Add Balance", callback_data='add_balance_menu')],
         [InlineKeyboardButton("🛍 AIM HACK", callback_data='aim_hack'), InlineKeyboardButton("🛍️ BALA MOD", callback_data='bala_mod')],
         [InlineKeyboardButton("🛍️ DRIP WIRE", callback_data='drip_wire'), InlineKeyboardButton("🛍 HG CHEATS", callback_data='hg_cheats')],
-        [InlineKeyboardButton("🛍 PRIME HOOK", callback_data='prime_hook'), InlineKeyboardButton("🛍️ XYZ CHEATS", callback_data='xyz_cheats')],
-        [InlineKeyboardButton("🛍️ Z REX", callback_data='z_rex')]
+        [InlineKeyboardButton("🛍 PRIME HOOK", callback_data='prime_hook'), InlineKeyboardButton("🛍 XYZ CHEATS", callback_data='xyz_cheats')],
+        [InlineKeyboardButton("🛍 Z REX", callback_data='z_rex')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     msg = (
@@ -69,7 +70,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await start(update, context)
         return
 
-    # ১. ওয়ালেট ইনফো
     if data == 'my_wallet':
         bal = get_user_balance(user_id)
         w_msg = (
@@ -86,7 +86,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(w_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ২. ব্যালেন্স এড করার মেনু
     if data == 'add_balance_menu':
         kb = [
             [InlineKeyboardButton("🇧🇩 Add BDT (Bkash/Nagad)", callback_data='select_country_BD'), InlineKeyboardButton("🇮🇳 Add INR (PhonePe/UPI)", callback_data='select_country_IN')],
@@ -128,7 +127,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 f"🔴 **নগদ (Send Money):** `01319098849`\n"
                 f"💗 **বিকাশ (Personal):** `01757958863`\n\n"
                 f"📌 **আপনার সিলেক্ট করা পরিমাণ:** `{selected_amount} ৳`\n"
-                f"উপরের নম্বরগুলোতে **{selected_amount} ৳** পাঠিয়ে পেমেন্টের **Screenshot** বা Transaction ID পাঠান।"
+                f"উপরের নম্বরগুলোতে **{selected_amount} ৳** পাঠিয়ে পেমেন্টের **Screenshot** পাঠান।"
             )
             kb = [[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]]
             await query.message.reply_text(bd_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
@@ -150,38 +149,48 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await query.message.reply_text(in_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৩. অ্যাডমিন দ্বারা অ্যাপপ্রুভ ও রিজেক্ট
-    if data.startswith("app_"):
+    # Approve for Wallet Balance
+    if data.startswith("app_wallet_"):
         parts = data.split("_")
-        target_user_id = int(parts[1])
-        amount = float(parts[2])
-        currency = parts[3]
-        type_flag = parts[4] if len(parts) > 4 else "wallet"
+        target_user_id = int(parts[2])
+        amount = float(parts[3])
+        currency = parts[4]
 
-        if type_flag == "wallet":
-            bal = get_user_balance(target_user_id)
-            bal[currency] += amount
-            approve_text = f"🎉 **পেমেন্ট সফল হয়েছে!**\n\nআপনার ওয়ালেটে **{amount} {currency}** যোগ করা হয়েছে। বর্তমান ব্যালেন্স: `{round(bal[currency], 2)} {currency}`"
-        else:
-            approve_text = f"🎉 **পেমেন্ট ভেরিফাইড হয়েছে!**\n\nঅ্যাডমিন আপনার অর্ডারটি গ্রহণ করেছে। কিছুক্ষণের মধ্যে আপনার Key পাঠানো হচ্ছে।"
+        bal = get_user_balance(target_user_id)
+        bal[currency] += amount
+        approve_text = f"🎉 **পেমেন্ট সফল হয়েছে!**\n\nআপনার ওয়ালেটে **{amount} {currency}** যোগ করা হয়েছে। বর্তমান ব্যালেন্স: `{round(bal[currency], 2)} {currency}`"
 
         user_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Main Menu", callback_data='main_menu')]])
-        
         try:
             await context.bot.send_message(chat_id=target_user_id, text=approve_text, parse_mode='Markdown', reply_markup=user_kb)
         except Exception as e:
             logging.error(f"Failed msg: {e}")
 
-        status_msg = f"\n\n✅ **APPROVED ({amount} {currency})**"
+        status_msg = f"\n\n✅ **APPROVED ({amount} {currency} Added)**"
         if query.message.caption:
             await query.edit_message_caption(caption=query.message.caption + status_msg, parse_mode='Markdown')
         else:
             await query.edit_message_text(text=query.message.text + status_msg, parse_mode='Markdown')
         return
 
+    # Prompt Admin to send Key for Direct Order
+    if data.startswith("app_direct_"):
+        parts = data.split("_")
+        target_user_id = int(parts[2])
+        pkg_name = parts[3]
+        
+        pending_keys[user_id] = target_user_id
+        prompt_msg = (
+            f"🔑 **আপনার কাঙ্ক্ষিত Key-টি মেসেজে লিখে পাঠান:**\n\n"
+            f"ইউজার ID: `{target_user_id}`\n"
+            f"প্রোডাক্ট: `{pkg_name}`\n\n"
+            f"*(শুধু Key বা ডাউনলোড লিঙ্ক লিখে সেন্ড করুন, ইউজারের কাছে সরাসরি চলে যাবে)*"
+        )
+        await query.message.reply_text(prompt_msg, parse_mode='Markdown')
+        return
+
     if data.startswith("rej_"):
         target_user_id = int(data.split("_")[1])
-
         reject_text = "❌ **Payment Verification Failed!**\n\nYour submitted payment proof was invalid or fake. Please send a valid screenshot."
         user_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Main Menu", callback_data='main_menu')]])
         
@@ -197,7 +206,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.edit_message_text(text=query.message.text + status_msg, parse_mode='Markdown')
         return
 
-    # ৪. প্যাকেজ নির্বাচন (Direct Pay + Wallet Buy Option)
     if data.startswith("pkg_"):
         raw_info = data.replace("pkg_", "")
         pkg_name, price_str = raw_info.split("|")
@@ -221,7 +229,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(country_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৪.১ সরাসরি কেনা (Direct Payment Option)
     if data.startswith("pay_direct_"):
         country = data.split("_")[2]
         pkg_name = context.user_data.get('pkg_name', 'Package')
@@ -237,7 +244,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 f"💰 **Amount to Pay:** `{price} ৳`\n\n"
                 f"🔴 **নগদ (Send Money):** `01319098849`\n"
                 f"💗 **বিকাশ (Personal):** `01757958863`\n\n"
-                f"উপরের নম্বরগুলোতে **{price} ৳** পাঠিয় পেমেন্টের **Screenshot** বা Transaction ID পাঠান।"
+                f"উপরের নম্বরগুলোতে **{price} ৳** পাঠিয় পেমেন্টের **Screenshot** পাঠান।"
             )
             kb = [[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]]
             await query.message.reply_text(bd_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
@@ -257,7 +264,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await query.message.reply_text(in_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৪.২ ওয়ালেট দিয়ে কেনা
     if data.startswith("buy_wallet_"):
         currency = data.split("_")[2]
         pkg_name = context.user_data.get('pkg_name', 'Product')
@@ -277,12 +283,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text(success_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
             
             admin_noti = (
-                f"🛍️ **NEW WALLET ORDER RECEIVED!**\n\n"
+                f"🛍️️ **NEW WALLET ORDER RECEIVED!**\n\n"
                 f"👤 **User:** {query.from_user.full_name} (@{query.from_user.username})\n"
                 f"🆔 **ID:** `{user_id}`\n"
                 f"📦 **Product:** `{pkg_name}`\n"
                 f"💵 **Paid:** `{price} {currency}`\n\n"
-                f"📌 **ইউজারকে Key পাঠাতে কমান্ডটি কপি করে Key বসান:**\n"
+                f"📌 **ইউজারকে Key পাঠাতে এটি কপি করুন:**\n"
                 f"`/sendkey {user_id} আপনার_কী_এখানে_লিখুন`"
             )
             await context.bot.send_message(chat_id=ADMIN_ID, text=admin_noti, parse_mode='Markdown')
@@ -301,7 +307,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # প্যাকেজের তালিকা
+    # Packages List
     packages = []
     title = ""
 
@@ -322,7 +328,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         packages = [("1 hour - ৳20", "pkg_AIM 1h|20"), ("3 hour - ৳40", "pkg_AIM 3h|40"), ("6 hour - ৳60", "pkg_AIM 6h|60"), ("12 hour - ৳90", "pkg_AIM 12h|90"), ("1 day - ৳130", "pkg_AIM 1d|130"), ("3 day - ৳250", "pkg_AIM 3d|250"), ("7 day - ৳400", "pkg_AIM 7d|400"), ("30 day - ৳1100", "pkg_AIM 30d|1100")]
     elif data == 'bala_mod':
         title = "BALA MOD - NON ROOT"
-        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|40"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 6h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 9h|120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 3d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
+        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|40"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 6h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 3d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
     elif data == 'drip_wire':
         title = "DRIP WIRE - NON ROOT"
         packages = [("Wire 6 hour - ৳48", "pkg_Wire 6h|48"), ("Wire 12 hour - ৳75", "pkg_Wire 12h|75"), ("Wire 1 day - ৳120", "pkg_Wire 1d|120"), ("Wire 7 day - ৳450", "pkg_Wire 7d|450"), ("Wire 30 day - ৳1100", "pkg_Wire 30d|1100")]
@@ -337,7 +343,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')])
     await query.message.reply_text(f"📦 **{title}**\n\nSelect a package:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Key পাঠানোর কাস্টম কমান্ড
 async def send_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -357,15 +362,20 @@ async def send_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         await update.message.reply_text("❌ **ভুল ফরম্যাট!** এভাবে লিখুন:\n`/sendkey USER_ID আপনার_কী`", parse_mode='Markdown')
 
-# Gemini AI ভেরিফিকেশন
-async def verify_payment_with_ai(image_bytes=None, text_proof=None):
-    prompt = """
-    You are an AI Payment Verification Specialist for mobile banking in Bangladesh (Bkash, Nagad) and India (UPI, PhonePe, Paytm, Google Pay).
-    Check the input carefully.
-    
-    Rule:
-    - If it is a real payment receipt image or valid TrxID text, set valid to true.
-    - If it is a personal picture, meme, nature picture, random text, non-payment image, or fake receipt, set valid to false.
+# Strict Payment Verification
+async def verify_payment_with_ai(country, image_bytes=None, text_proof=None):
+    if text_proof:
+        # Check if text looks like random garbage or less than 8 characters
+        if len(text_proof.strip()) < 8 or not re.search(r'\d', text_proof):
+            return False
+            
+    prompt = f"""
+    You are an extremely strict AI Payment Verification Expert.
+    Country Mode Selected: {country} (BD = Bangladesh, IN = India)
+
+    STRICT RULES:
+    1. Only approve if the photo is an EXACT payment screenshot from Bkash, Nagad, PhonePe, Paytm, or UPI.
+    2. Reject all random photos, memes, selfies, or non-payment images.
     """
     
     try:
@@ -374,7 +384,7 @@ async def verify_payment_with_ai(image_bytes=None, text_proof=None):
             img = Image.open(BytesIO(image_bytes))
             contents.append(img)
         else:
-            contents.append(f"User Submitted Text: {text_proof}")
+            contents.append(f"User Text Proof: {text_proof}")
 
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
@@ -384,8 +394,7 @@ async def verify_payment_with_ai(image_bytes=None, text_proof=None):
                 response_schema={
                     "type": "OBJECT",
                     "properties": {
-                        "is_valid": {"type": "BOOLEAN"},
-                        "reason": {"type": "STRING"}
+                        "is_valid": {"type": "BOOLEAN"}
                     },
                     "required": ["is_valid"]
                 }
@@ -395,12 +404,33 @@ async def verify_payment_with_ai(image_bytes=None, text_proof=None):
         return res_data.get("is_valid", False)
 
     except Exception as e:
-        logging.error(f"AI Verification Error: {e}")
-        return True
+        logging.error(f"AI Error: {e}")
+        return False
 
-# কাস্টমার স্ক্রিনশট বা প্রুফ পাঠালে
+# Handle Input/Proof
 async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    
+    # Check if Admin is responding with a Key
+    if user.id == ADMIN_ID and user.id in pending_keys:
+        target_user_id = pending_keys.pop(user.id)
+        key_text = update.message.text
+        
+        key_msg = (
+            f"🎉 **YOUR LICENSE KEY & APP LINK!**\n\n"
+            f"🔑 **Key/Link Details:**\n`{key_text}`\n\n"
+            f"ধন্যবাদ আমাদের সাথে থাকার জন্য! ❤️"
+        )
+        try:
+            await context.bot.send_message(chat_id=target_user_id, text=key_msg, parse_mode='Markdown')
+            await update.message.reply_text(f"✅ **User ID `{target_user_id}` কে সফলভাবে Key পাঠানো হয়েছে!**", parse_mode='Markdown')
+        except Exception as e:
+            await update.message.reply_text(f"❌ মেসেজ পাঠানো যায়নি: {e}")
+        return
+
+    if update.message.text and update.message.text.startswith('/'):
+        return
+
     user_country = context.user_data.get('country', 'BD')
     amount = context.user_data.get('selected_amount', 100.0)
     is_direct_buy = context.user_data.get('is_direct_buy', False)
@@ -410,7 +440,7 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
     username_str = f"@{user.username}" if user.username else "No Username"
     text_input = update.message.text if update.message.text else "Photo Attachment"
 
-    verifying_msg = await update.message.reply_text("🔍 **AI is verifying your payment proof... Please wait.**")
+    verifying_msg = await update.message.reply_text("🔍 **AI is verifying payment proof... Please wait.**")
     
     is_valid = False
     image_bytes = None
@@ -418,39 +448,46 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.message.photo:
         photo_file = await update.message.photo[-1].get_file()
         image_bytes = await photo_file.download_as_bytearray()
-        is_valid = await verify_payment_with_ai(image_bytes=image_bytes)
+        is_valid = await verify_payment_with_ai(country=user_country, image_bytes=image_bytes)
     else:
-        is_valid = await verify_payment_with_ai(text_proof=update.message.text)
+        is_valid = await verify_payment_with_ai(country=user_country, text_proof=update.message.text)
 
     await verifying_msg.delete()
 
     if not is_valid:
-        error_msg_english = (
-            "⚠️ **Invalid Payment Proof Detected!**\n\n"
-            "Our AI system detected that the uploaded image or text is NOT a valid payment receipt.\n"
-            "Please upload a **clear and valid payment screenshot** or Transaction ID."
+        error_msg = (
+            "⚠️️ **Invalid Payment Proof!**\n\n"
+            "আপনার পাঠানো ছবি বা টেক্সটটি সঠিক পেমেন্ট প্রুফ নয়।\n"
+            "অনুগ্রহ করে বিকাশ, নগদ বা UPI-এর আসল **Payment Screenshot** পাঠান।"
         )
         user_cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]])
-        await update.message.reply_text(error_msg_english, parse_mode='Markdown', reply_markup=user_cancel_kb)
+        await update.message.reply_text(error_msg, parse_mode='Markdown', reply_markup=user_cancel_kb)
         return
 
-    type_tag = "direct" if is_direct_buy else "wallet"
-    type_title = f"DIRECT ORDER ({pkg_name})" if is_direct_buy else "BALANCE ADD REQUEST"
-
-    admin_msg = (
-        f"🚨 **NEW {type_title}! (AI Verified ✅)**\n\n"
-        f"👤 **User Name:** {user.full_name}\n"
-        f"🏷 **Username:** {username_str}\n"
-        f"🆔 **User ID:** `{user.id}`\n"
-        f"🌐 **Country Mode:** {user_country}\n"
-        f"💵 **Selected Amount:** `{amount} {currency}`\n"
-        f"📝 **User Input/Proof:** {text_input}\n"
-    )
-    
-    admin_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Approve ({amount} {currency})", callback_data=f"app_{user.id}_{amount}_{currency}_{type_tag}")],
-        [InlineKeyboardButton("❌ Reject Request", callback_data=f"rej_{user.id}")]
-    ])
+    if is_direct_buy:
+        admin_msg = (
+            f"🚨 **NEW DIRECT ORDER ({pkg_name})!**\n\n"
+            f"👤 **User:** {user.full_name}\n"
+            f"🏷 **Username:** {username_str}\n"
+            f"🆔 **User ID:** `{user.id}`\n"
+            f"💵 **Price:** `{amount} {currency}`\n\n"
+            f"👇 **ইউজারকে Key পাঠাতে নিচের বাটনে চাপ দিন:**"
+        )
+        admin_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔑 Approve & Send Key", callback_data=f"app_direct_{user.id}_{pkg_name}")],
+            [InlineKeyboardButton("❌ Reject Request", callback_data=f"rej_{user.id}")]
+        ])
+    else:
+        admin_msg = (
+            f"🚨 **NEW BALANCE ADD REQUEST!**\n\n"
+            f"👤 **User:** {user.full_name}\n"
+            f"🆔 **User ID:** `{user.id}`\n"
+            f"💵 **Amount:** `{amount} {currency}`"
+        )
+        admin_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"✅ Approve ({amount} {currency})", callback_data=f"app_wallet_{user.id}_{amount}_{currency}")],
+            [InlineKeyboardButton("❌ Reject Request", callback_data=f"rej_{user.id}")]
+        ])
     
     if update.message.photo:
         await context.bot.send_photo(
@@ -468,17 +505,19 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=admin_markup
         )
 
-    user_response = f"⏳ **Payment Proof Received!**\n\nAdmin will verify and complete your request shortly."
+    user_response = f"⏳ **Payment Proof Received!**\n\nAdmin will verify and send your Key shortly."
     user_cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')]])
 
     await update.message.reply_text(user_response, parse_mode='Markdown', reply_markup=user_cancel_kb)
 
 def main():
     application = Application.builder().token(TOKEN).build()
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("sendkey", send_key_command))
     application.add_handler(CallbackQueryHandler(button_click))
     application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT, handle_payment_proof))
+    
     application.run_polling()
 
 if __name__ == '__main__':
