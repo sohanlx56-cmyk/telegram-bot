@@ -1,21 +1,33 @@
 import logging
+import json
 from io import BytesIO
 from PIL import Image
 from google import genai
 from google.genai import types
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 
-TOKEN = '8735454318:AAG541sgaZrMIo7B2oUxGVEKybTnE_xmkk8'
+# Configuration Setup
+TOKEN = '8854896234:AAFvwhgwe5AorYDt8kAkNvPOcJwakrxbZ9Q'
 ADMIN_ID = 8935181146
-GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE'  # এখানে আপনার Gemini API Key বসান
+GEMINI_API_KEY = 'AQ.Ab8RN6Kuz6k0GfcaRuJRarQb-0SZx4w9jjNQ03tVNTVcXIkSA'
 
-# Gemini AI Client সেটআপ
+# Gemini AI Client
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-# ইউজারের ব্যালেন্স স্টোরেজ
+# User Balance Storage
 user_balances = {}
 
 def get_user_balance(user_id):
@@ -23,6 +35,7 @@ def get_user_balance(user_id):
         user_balances[user_id] = {'BDT': 0.0, 'INR': 0.0}
     return user_balances[user_id]
 
+# Start Command & Main Menu
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     bal = get_user_balance(user_id)
@@ -43,9 +56,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     if update.message:
         await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
-    else:
+    elif update.callback_query:
         await update.callback_query.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
 
+# Callback Buttons Management
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -56,7 +70,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await start(update, context)
         return
 
-    # ১. ওয়ালেট দেখা
+    # Wallet Details
     if data == 'my_wallet':
         bal = get_user_balance(user_id)
         w_msg = (
@@ -73,7 +87,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(w_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ২. ব্যালেন্স অ্যাড মেনু
+    # Add Balance Menu
     if data == 'add_balance_menu':
         kb = [
             [InlineKeyboardButton("🇧🇩 Add BDT (Bkash/Nagad)", callback_data='select_country_BD'), InlineKeyboardButton("🇮🇳 Add INR (PhonePe/UPI)", callback_data='select_country_IN')],
@@ -82,7 +96,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text("🌐 **Select Payment Currency / কারেন্সি সিলেক্ট করুন:**", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৩. টাকার পরিমাণ নির্বাচন
+    # Country & Amount Selection
     if data.startswith("select_country_"):
         country = data.split("_")[2]
         context.user_data['country'] = country
@@ -104,7 +118,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(amt_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৪. পেমেন্ট ইনফরমেশন
+    # Display Payment Credentials
     if data.startswith("amt_"):
         selected_amount = float(data.split("_")[1])
         context.user_data['selected_amount'] = selected_amount
@@ -138,7 +152,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await query.message.reply_text(in_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৫. অ্যাডমিন অ্যাপ্রুভ বা রিজেক্ট
+    # Admin Balance Approval
     if data.startswith("app_"):
         parts = data.split("_")
         target_user_id = int(parts[1])
@@ -185,7 +199,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.edit_message_text(text=query.message.text + status_msg, parse_mode='Markdown')
         return
 
-    # ৬. প্যাকেজ নির্বাচন
+    # Package Selection
     if data.startswith("pkg_"):
         raw_info = data.replace("pkg_", "")
         pkg_name, price_str = raw_info.split("|")
@@ -209,7 +223,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await query.message.reply_text(country_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # ৭. বাই উইথ ওয়ালেট
+    # Buy Product using Wallet
     if data in ['buy_bdt', 'buy_inr']:
         currency = 'BDT' if data == 'buy_bdt' else 'INR'
         pkg_name = context.user_data.get('pkg_name', 'Product')
@@ -252,6 +266,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.message.reply_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         return
 
+    # Panel Products List
     packages = []
     title = ""
 
@@ -272,7 +287,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         packages = [("1 hour - ৳20", "pkg_AIM 1h|20"), ("3 hour - ৳40", "pkg_AIM 3h|40"), ("6 hour - ৳60", "pkg_AIM 6h|60"), ("12 hour - ৳90", "pkg_AIM 12h|90"), ("1 day - ৳130", "pkg_AIM 1d|130"), ("3 day - ৳250", "pkg_AIM 3d|250"), ("7 day - ৳400", "pkg_AIM 7d|400"), ("30 day - ৳1100", "pkg_AIM 30d|1100")]
     elif data == 'bala_mod':
         title = "BALA MOD - NON ROOT"
-        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|40"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 9h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 9h|120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 3d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
+        packages = [("1 hour - ৳20", "pkg_Bala 1h|20"), ("2 hour - ৳40", "pkg_Bala 2h|40"), ("3 hour - ৳60", "pkg_Bala 3h|60"), ("4 hour - ৳70", "pkg_Bala 4h|70"), ("5 hour - ৳80", "pkg_Bala 5h|80"), ("6 hour - ৳90", "pkg_Bala 6h|90"), ("7 hour - ৳100", "pkg_Bala 7h|100"), ("8 hour - ৳110", "pkg_Bala 8h|110"), ("9 hour - ৳120", "pkg_Bala 9h|120"), ("10 hour - ৳130", "pkg_Bala 10h|130"), ("1 day - ৳280", "pkg_Bala 1d|280"), ("2 day - ৳550", "pkg_Bala 2d|550"), ("3 day - ৳750", "pkg_Bala 3d|750"), ("7 day - ৳1750", "pkg_Bala 7d|1750"), ("30 day - ৳7200", "pkg_Bala 30d|7200")]
     elif data == 'drip_wire':
         title = "DRIP WIRE - NON ROOT"
         packages = [("Wire 6 hour - ৳48", "pkg_Wire 6h|48"), ("Wire 12 hour - ৳75", "pkg_Wire 12h|75"), ("Wire 1 day - ৳120", "pkg_Wire 1d|120"), ("Wire 7 day - ৳450", "pkg_Wire 7d|450"), ("Wire 30 day - ৳1100", "pkg_Wire 30d|1100")]
@@ -287,7 +302,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data='main_menu')])
     await query.message.reply_text(f"📦 **{title}**\n\nSelect a package:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ৮. অ্যাডমিন দ্বারা Key পাঠানোর কমান্ড
+# Admin Key Command
 async def send_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -307,7 +322,7 @@ async def send_key_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         await update.message.reply_text("❌ **ভুল ফরম্যাট!** এভাবে লিখুন:\n`/sendkey USER_ID আপনার_কী`", parse_mode='Markdown')
 
-# 🤖 Gemini AI দ্বারা পেমেন্ট ফিল্টারিং ফিক্সড ফাংশন
+# Gemini AI Payment Scan Function
 async def verify_payment_with_ai(image_bytes=None, text_proof=None):
     prompt = """
     You are an AI Payment Verification Specialist for mobile banking in Bangladesh (Bkash, Nagad) and India (UPI, PhonePe, Paytm, Google Pay).
@@ -341,15 +356,14 @@ async def verify_payment_with_ai(image_bytes=None, text_proof=None):
                 }
             )
         )
-        import json
         res_data = json.loads(response.text)
         return res_data.get("is_valid", False)
 
     except Exception as e:
         logging.error(f"AI Verification Error: {e}")
-        return True  # AI কাজ না করলে ম্যানুয়াল অ্যাডমিন রিভিউয়ের জন্য পাশ করিয়ে দেওয়া হবে।
+        return True
 
-# ৯. পেমেন্ট স্ক্রিনশট প্রসেসিং
+# Payment Proof Processing
 async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     user_country = context.user_data.get('country', 'BD')
@@ -375,7 +389,7 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if not is_valid:
         error_msg_english = (
-            "⚠️️ **Invalid Payment Proof Detected!**\n\n"
+            "⚠️ **Invalid Payment Proof Detected!**\n\n"
             "Our AI system detected that the uploaded image or text is NOT a valid payment receipt.\n"
             "Please upload a **clear and valid payment screenshot** or Transaction ID."
         )
@@ -419,6 +433,7 @@ async def handle_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.message.reply_text(user_response, parse_mode='Markdown', reply_markup=user_cancel_kb)
 
+# Application Main Runner
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
